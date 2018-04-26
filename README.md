@@ -1,3 +1,7 @@
+| :mega: Calling for Maintainers |
+|--------------|
+| Because OData WebApi does not support ASP.NET Core (see https://github.com/OData/WebApi/issues/939) and I am 100% focused on new ASP.NET Core development, I don't have the capacity to maintain this project. Still, I'd love to see it live on and am seeking one or two "core" contributors / maintainers. Ideally, these would be people who have already contributed through PRs and understand the inner workings and overall design. If you're interested, please let me know by adding a comment [here](https://github.com/rbeauchamp/Swashbuckle.OData/issues/175). Thank you! |
+
 Swashbuckle.OData
 =========
 
@@ -73,13 +77,24 @@ config.AddCustomSwaggerRoute(customODataRoute, "/Customers({Id})/Orders")
     // The name of the parameter as it appears in the controller action
     .BodyParameter<Order>("order");
 ```
-The above route resolves to an `OrderController` action of:
+The above route resolves to an `OrdersController` (the last path segment defining the controller) and hits the `Post` action:
 ```csharp
 [ResponseType(typeof(Order))]
 public async Task<IHttpActionResult> Post([FromODataUri] int customerId, Order order)
 {
   ...
 }
+```
+
+### Custom property resolver ###
+
+The following snippet demonstrates how to configure a custom property resolver, which resolves a schema's property name, instead of using a DataMemberAttribute:
+```csharp
+c.CustomProvider(defaultProvider => new ODataSwaggerProvider(defaultProvider, c, GlobalConfiguration.Configuration).Configure(odataConfig =>
+                    {
+                        //Set custom ProperyResolver
+                        odataConfig.SetProperyResolver(new DefaultProperyResolver());
+                    }));
 ```
 
 #### RESTier ####
