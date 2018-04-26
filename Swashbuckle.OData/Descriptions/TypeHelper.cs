@@ -13,12 +13,22 @@ using System.Web.OData.Formatter;
 
 namespace System.Web.OData
 {
-    /// <summary> 
+    /// <summary>
     /// Provides an abstraction for managing the properties of an type.
     /// </summary>
     public interface IProperyResolver
     {
         string ResolveName(MemberInfo memberInfo, string defaultName);
+    }
+
+    /// <summary>
+    /// Provides an abstraction for managing type resolving.
+    /// </summary>
+    public interface ITypeResolver
+    {
+        IEnumerable<Type> LoadedTypes { get; }
+
+        Type FindType(string fullName);
     }
 
     /// <summary>
@@ -36,10 +46,71 @@ namespace System.Web.OData
         }
     }
 
+    public class DefaultTypeResolver : ITypeResolver
+    {
+        private IAssembliesResolver _assembliesResolver;
+        private Lazy<IEnumerable<Type>> _loadedTypes;
+
+        public DefaultTypeResolver(IAssembliesResolver assemblyResolver)
+        {
+            this._assembliesResolver = assemblyResolver;
+            this._loadedTypes = new Lazy<IEnumerable<Type>>(GetLoadedTypes);
+        }
+
+        public IEnumerable<Type> LoadedTypes { get { return _loadedTypes.Value; } }
+
+        public virtual Type FindType(string fullName)
+        {
+            return _loadedTypes.Value.First(t => t.FullName.Equals(fullName));
+        }
+
+
+        [SuppressMessage("Microsoft.Design", "CA1031:DoNotCatchGeneralExceptionTypes", Justification = "Catching all exceptions in this case is the right to do.")]
+        // This code is copied from DefaultHttpControllerTypeResolver.GetControllerTypes.
+        protected virtual IEnumerable<Type> GetLoadedTypes()
+        {
+            var result = new List<Type>();
+
+            // Go through all assemblies referenced by the application and search for types matching a predicate
+            var assemblies = _assembliesResolver.GetAssemblies();
+            Contract.Assume(assemblies != null);
+            foreach (var assembly in assemblies)
+            {
+                Type[] exportedTypes;
+                if (assembly == null || assembly.IsDynamic)
+                {
+                    // can't call GetTypes on a null (or dynamic?) assembly
+                    continue;
+                }
+
+                try
+                {
+                    exportedTypes = assembly.GetTypes();
+                }
+                catch (ReflectionTypeLoadException ex)
+                {
+                    exportedTypes = ex.Types;
+                }
+                catch
+                {
+                    continue;
+                }
+
+                if (exportedTypes != null)
+                {
+                    result.AddRange(exportedTypes.Where(t => t != null && t.IsVisible));
+                }
+            }
+
+            return result;
+        }
+    }
+
     internal static class TypeHelper
     {
         private static IAssembliesResolver _assembliesResolver =  new DefaultAssembliesResolver();
         private static IProperyResolver _propertyResolver = new DefaultProperyResolver();
+        private static ITypeResolver _typeResolver = new DefaultTypeResolver(_assembliesResolver);
 
         internal static Type ToNullable(this Type t)
         {
@@ -136,6 +207,15 @@ namespace System.Web.OData
         }
 
         /// <summary>
+        /// Sets the custom type resolver to be used instead of using the default one.
+        /// </summary>
+        /// <param name="typeResolver">The type resolver.</param>
+        internal static void SetTypeResolver(ITypeResolver typeResolver)
+        {
+            _typeResolver = typeResolver;
+        }
+
+        /// <summary>
         ///     Determines whether the given type is a primitive type or
         ///     is a <see cref="string" />, <see cref="DateTime" />, <see cref="Decimal" />,
         ///     <see cref="Guid" />, <see cref="DateTimeOffset" /> or <see cref="TimeSpan" />.
@@ -213,40 +293,7 @@ namespace System.Web.OData
         // This code is copied from DefaultHttpControllerTypeResolver.GetControllerTypes.
         internal static IEnumerable<Type> GetLoadedTypes()
         {
-            var result = new List<Type>();
-
-            // Go through all assemblies referenced by the application and search for types matching a predicate
-            var assemblies = _assembliesResolver.GetAssemblies();
-            Contract.Assume(assemblies != null);
-            foreach (var assembly in assemblies)
-            {
-                Type[] exportedTypes;
-                if (assembly == null || assembly.IsDynamic)
-                {
-                    // can't call GetTypes on a null (or dynamic?) assembly
-                    continue;
-                }
-
-                try
-                {
-                    exportedTypes = assembly.GetTypes();
-                }
-                catch (ReflectionTypeLoadException ex)
-                {
-                    exportedTypes = ex.Types;
-                }
-                catch
-                {
-                    continue;
-                }
-
-                if (exportedTypes != null)
-                {
-                    result.AddRange(exportedTypes.Where(t => t != null && t.IsVisible));
-                }
-            }
-
-            return result;
+            return _typeResolver.LoadedTypes;
         }
 
         /// <summary>
@@ -296,8 +343,7 @@ namespace System.Web.OData
         /// </returns>
         internal static Type FindType(string fullName)
         {
-            return GetLoadedTypes()
-                .First(t => t.FullName.Equals(fullName));
+            return _typeResolver.FindType(fullName);
         }
     }
 }

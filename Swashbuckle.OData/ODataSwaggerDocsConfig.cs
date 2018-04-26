@@ -204,5 +204,10 @@ namespace Swashbuckle.OData
         {
             TypeHelper.SetProperyResolver(propertyResolver);
         }
+
+        public void SetTypeResolver(ITypeResolver typeResolver)
+        {
+            TypeHelper.SetTypeResolver(typeResolver);
+        }
     }
 }
