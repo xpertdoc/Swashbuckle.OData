@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Linq;
 using System.Reflection;
@@ -103,6 +104,34 @@ namespace Swashbuckle.OData.Tests
             }
         }
 
+        [Test]
+        public async Task The_model_schema_matches_the_edm_model_with_custom_type_resolver()
+        {
+            using (WebApp.Start(HttpClientUtils.BaseAddress, appBuilder => ConfigurationWithTypeResolver(appBuilder, typeof(BrandsController), new ModelTypeResolver())))
+            {
+                // Arrange
+                var httpClient = HttpClientUtils.GetHttpClient(HttpClientUtils.BaseAddress);
+                // Verify that the OData route in the test controller is valid
+                var result = await httpClient.GetAsync("/odata/Brands");
+                result.IsSuccessStatusCode.Should().BeTrue();
+
+                // Act
+                var swaggerDocument = await httpClient.GetJsonAsync<SwaggerDocument>("swagger/docs/v1");
+
+                // Assert
+                swaggerDocument.definitions.Should().ContainKey("Brand");
+                var brandSchema = swaggerDocument.definitions["Brand"];
+
+                brandSchema.properties.Should().ContainKey("Id");
+                brandSchema.properties.Should().ContainKey("Code");
+                brandSchema.properties.Should().NotContainKey("name");
+                brandSchema.properties.Should().NotContainKey("Name");
+                brandSchema.properties.Should().ContainKey("Description");
+
+                await ValidationUtils.ValidateSwaggerJson();
+            }
+        }
+
         private static void Configuration(IAppBuilder appBuilder, Type targetController)
         {
             var config = appBuilder.GetStandardHttpConfig(targetController);
@@ -115,6 +144,15 @@ namespace Swashbuckle.OData.Tests
         private static void ConfigurationWithPropertyResolver(IAppBuilder appBuilder, Type targetController, IProperyResolver properyResolver)
         {
             var config = appBuilder.GetStandardHttpConfig(null, swg => swg.SetProperyResolver(properyResolver), targetController);
+
+            config.MapODataServiceRoute("ODataRoute", "odata", GetEdmModel());
+
+            config.EnsureInitialized();
+        }
+
+        private static void ConfigurationWithTypeResolver(IAppBuilder appBuilder, Type targetController, ITypeResolver typeResolver)
+        {
+            var config = appBuilder.GetStandardHttpConfig(null, swg => swg.SetTypeResolver(typeResolver), targetController);
 
             config.MapODataServiceRoute("ODataRoute", "odata", GetEdmModel());
 
@@ -161,6 +199,22 @@ namespace Swashbuckle.OData.Tests
         public string ResolveName(MemberInfo memberInfo, string defaultName)
         {
             return memberInfo.Name;
+        }
+    }
+
+    public class ModelTypeResolver : ITypeResolver
+    {
+        public IEnumerable<Type> LoadedTypes
+        {
+            get
+            {
+                throw new NotImplementedException();
+            }
+        }
+
+        public Type FindType(string fullName)
+        {
+            return typeof(DateTime);
         }
     }
 }

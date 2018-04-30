@@ -1,10 +1,12 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http;
 using System.Threading.Tasks;
 using System.Web.Http;
 using System.Web.Http.Controllers;
 using System.Web.Http.Dispatcher;
+using System.Web.OData;
 using FluentAssertions;
 using Microsoft.Owin.Hosting;
 using Microsoft.Restier.Providers.EntityFramework;
@@ -213,12 +215,47 @@ namespace Swashbuckle.OData.Tests
             }
         }
 
+        [Test]
+        public async Task It_has_a_restier_get_users_response_of_type_array_custom()
+        {
+            using (WebApp.Start(HttpClientUtils.BaseAddress, ConfigurationWithCustomTypeResolver))
+            {
+                // Arrange
+                var httpClient = HttpClientUtils.GetHttpClient(HttpClientUtils.BaseAddress);
+
+                // Act
+                var swaggerDocument = await httpClient.GetJsonAsync<SwaggerDocument>("swagger/docs/v1");
+
+                // Assert
+                PathItem pathItem;
+                swaggerDocument.paths.TryGetValue("/restier/Users", out pathItem);
+
+                var getUsersResponse = pathItem.get.responses.SingleOrDefault(response => response.Key == "200");
+                getUsersResponse.Should().NotBeNull();
+                getUsersResponse.Value.schema.@ref.Should().Be("#/definitions/ODataResponse[List[User]]");
+                swaggerDocument.definitions.Should().ContainKey("ODataResponse[List[User]]");
+                var responseSchema = swaggerDocument.definitions["ODataResponse[List[User]]"];
+                responseSchema.Should().NotBeNull();
+                responseSchema.properties.Should().NotBeNull();
+                responseSchema.properties.Should().ContainKey("@odata.context");
+                responseSchema.properties["@odata.context"].type.Should().Be("string");
+                responseSchema.properties["value"].type.Should().Be("array");
+                responseSchema.properties["value"].items.Should().NotBeNull();
+                responseSchema.properties["value"].items.@ref.Should().Be("#/definitions/User");
+
+                var postSchema = pathItem.post.parameters.First().schema;
+                postSchema.format.Should().Be("date-time");
+
+                await ValidationUtils.ValidateSwaggerJson();
+            }
+        }
+
         /// <summary>
         /// This code configures Web API.
         /// The TestWebApiStartup class is specified as a type parameter in the WebApp.Start method.
         /// </summary>
         /// <param name="appBuilder">The application builder.</param>
-        public async void NorthwindConfiguration(IAppBuilder appBuilder)
+        public static async void NorthwindConfiguration(IAppBuilder appBuilder)
         {
             var config = new HttpConfiguration
             {
@@ -289,6 +326,40 @@ namespace Swashbuckle.OData.Tests
 
             config.EnsureInitialized();
         }
+
+        private static async void ConfigurationWithCustomTypeResolver(IAppBuilder appBuilder)
+        {
+            var config = new HttpConfiguration
+            {
+                IncludeErrorDetailPolicy = IncludeErrorDetailPolicy.Always
+            };
+            var server = new HttpServer(config);
+            appBuilder.UseWebApi(server);
+            config.EnableSwagger(c =>
+            {
+                // Use "SingleApiVersion" to describe a single version API. Swagger 2.0 includes an "Info" object to
+                // hold additional metadata for an API. Version and title are required but you can also provide
+                // additional fields by chaining methods off SingleApiVersion.
+                //
+                c.SingleApiVersion("v1", "A title for your API");
+
+                // Wrap the default SwaggerGenerator with additional behavior (e.g. caching) or provide an
+                // alternative implementation for ISwaggerProvider with the CustomProvider option.
+                //
+                c.CustomProvider(defaultProvider => new ODataSwaggerProvider(defaultProvider, c, config).Configure(oc =>
+                {
+                    oc.SetTypeResolver(new RestierTypeResolver());
+                }));
+            }).EnableSwaggerUi();
+
+            FormatterConfig.Register(config);
+
+            config.Services.Replace(typeof(IHttpControllerSelector), new RestierControllerSelector(config));
+
+            await config.MapRestierRoute<EntityFrameworkApi<TestRestierODataContext>>("RESTierRoute", "restier", new RestierBatchHandler(server));
+
+            config.EnsureInitialized();
+        }
     }
 
     public class RestierControllerSelector : DefaultHttpControllerSelector
@@ -304,6 +375,22 @@ namespace Swashbuckle.OData.Tests
         public override IDictionary<string, HttpControllerDescriptor> GetControllerMapping()
         {
             return base.GetControllerMapping().Where(pair => pair.Value.ControllerName == "Restier").ToDictionary(pair => pair.Key, pair => pair.Value);
+        }
+    }
+
+    public class RestierTypeResolver : ITypeResolver
+    {
+        public IEnumerable<Type> LoadedTypes
+        {
+            get
+            {
+                throw new NotImplementedException();
+            }
+        }
+
+        public Type FindType(string fullName)
+        {
+            return typeof(DateTime);
         }
     }
 }
