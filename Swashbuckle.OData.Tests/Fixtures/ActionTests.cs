@@ -10,6 +10,8 @@ using System.Web.Http.Description;
 using System.Web.OData;
 using System.Web.OData.Builder;
 using System.Web.OData.Extensions;
+using System.Web.OData.Routing;
+using System.Web.OData.Routing.Conventions;
 using FluentAssertions;
 using Microsoft.OData.Edm;
 using Microsoft.Owin.Hosting;
@@ -214,12 +216,60 @@ namespace Swashbuckle.OData.Tests
             }
         }
 
+        [Test]
+        public async Task It_supports_unbound_actions()
+        {
+            using (WebApp.Start(HttpClientUtils.BaseAddress, appBuilder => Configuration(appBuilder, typeof(SuppliersController))))
+            {
+                // Arrange
+                var httpClient = HttpClientUtils.GetHttpClient(HttpClientUtils.BaseAddress);
+                // Verify that the OData route in the test controller is valid
+                var rating = new RatingDto
+                {
+                    Rating = 1
+                };
+                var result = await httpClient.PostAsJsonAsync("/odata/Suppliers(1)/Default.Rate", rating);
+                result.IsSuccessStatusCode.Should().BeTrue();
+
+                // Act
+                var swaggerDocument = await httpClient.GetJsonAsync<SwaggerDocument>("swagger/docs/v1");
+
+                // Assert
+                PathItem pathItem;
+                swaggerDocument.paths.TryGetValue("/odata/Calculate", out pathItem);
+                pathItem.Should().NotBeNull();
+                pathItem.post.Should().NotBeNull();
+                pathItem.post.parameters.Count.Should().Be(1);
+
+                var bodyParameter = pathItem.post.parameters.SingleOrDefault(parameter => parameter.@in == "body");
+                bodyParameter.Should().NotBeNull();
+                bodyParameter.@in.Should().Be("body");
+                bodyParameter.schema.Should().NotBeNull();
+                bodyParameter.schema.type.Should().Be("object");
+                bodyParameter.schema.properties.Should().NotBeNull();
+                bodyParameter.schema.properties.Count.Should().Be(2);
+                bodyParameter.schema.properties.Should().ContainKey("amount");
+                bodyParameter.schema.properties.Single(pair => pair.Key == "amount").Value.type.Should().Be("integer");
+                bodyParameter.schema.properties.Single(pair => pair.Key == "amount").Value.format.Should().Be("int32");
+                bodyParameter.schema.properties.Should().ContainKey("label");
+                bodyParameter.schema.properties.Single(pair => pair.Key == "label").Value.type.Should().Be("string");
+                bodyParameter.schema.properties.Single(pair => pair.Key == "label").Value.format.Should().BeNull();
+                bodyParameter.schema.required.Should().NotBeNull();
+                bodyParameter.schema.required.Count.Should().Be(1);
+
+                await ValidationUtils.ValidateSwaggerJson();
+            }
+        }
+
         private static void Configuration(IAppBuilder appBuilder, Type targetController)
         {
             var config = appBuilder.GetStandardHttpConfig(targetController);
 
+            var routingConventions = ODataRoutingConventions.CreateDefault();
+            routingConventions.Insert(routingConventions.Count - 1, new NonBindableActionODataRoutingConvention<SuppliersController>());
+
             // Define a route to a controller class that contains functions
-            config.MapODataServiceRoute("ODataRoute", "odata", GetEdmModel());
+            config.MapODataServiceRoute("ODataRoute", "odata", GetEdmModel(), new DefaultODataPathHandler(), routingConventions);
 
             config.EnsureInitialized();
         }
@@ -236,7 +286,7 @@ namespace Swashbuckle.OData.Tests
             create.Parameter<string>("code").OptionalParameter = false;
             create.Parameter<string>("name").OptionalParameter = false;
             create.Parameter<string>("description");
-            
+
             var createWithEnum = entityType.Collection.Action("CreateWithEnum");
             createWithEnum.ReturnsFromEntitySet<Supplier>("Suppliers");
             createWithEnum.Parameter<MyEnum?>("EnumValue");
@@ -244,6 +294,10 @@ namespace Swashbuckle.OData.Tests
             var postArray = entityType.Collection.Action("PostArrayOfSuppliers");
             postArray.ReturnsCollectionFromEntitySet<Supplier>("Suppliers");
             postArray.CollectionParameter<SupplierDto>("suppliers");
+
+            var unbound = builder.Action("Calculate");
+            unbound.Parameter<int>("amount");
+            unbound.Parameter<string>("label");
 
             entityType.Action("Rate")
                 .Parameter<int>("Rating");
@@ -309,6 +363,13 @@ namespace Swashbuckle.OData.Tests
         public IHttpActionResult CreateWithEnum(ODataActionParameters parameters)
         {
             return Created(new Supplier { Id = 1 });
+        }
+
+        [HttpPost]
+        [ResponseType(typeof(Supplier))]
+        public IHttpActionResult Calculate(ODataActionParameters parameters)
+        {
+            return Created(new Supplier { Id = 5 });
         }
 
         [HttpPost]

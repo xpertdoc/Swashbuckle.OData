@@ -188,6 +188,7 @@
     <Compile Include="Fixtures\StringTypeUrlParamTests.cs" />
     <Compile Include="HttpClientUtils.cs" />
     <Compile Include="Fixtures\GetTests.cs" />
+    <Compile Include="NonBindableActionODataRoutingConvention.cs" />
     <Compile Include="NorthwindAPI\Category.cs" />
     <Compile Include="NorthwindAPI\NorthwindCustomer.cs" />
     <Compile Include="NorthwindAPI\CustomerDemographic.cs" />

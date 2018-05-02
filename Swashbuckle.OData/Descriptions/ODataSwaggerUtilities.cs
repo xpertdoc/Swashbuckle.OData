@@ -180,16 +180,16 @@ namespace Swashbuckle.OData.Descriptions
                     keyDefinitionAsType = keyDefinition as IEdmPrimitiveType;
                 }
                 else if(EdmTypeKind.Enum == keyDefinition.TypeKind)
-                { 
+                {
                     keyDefinitionAsType = keyDefinition as IEdmEnumType;
                 }
                 Contract.Assume(keyDefinitionAsType != null);
-                
+
                 keyParameters.Parameter(
-                                key.Name, 
-                                "path", 
-                                "key: " + key.Name, 
-                                keyDefinitionAsType, 
+                                key.Name,
+                                "path",
+                                "key: " + key.Name,
+                                keyDefinitionAsType,
                                 true);
             }
             return new PathItem
@@ -245,18 +245,25 @@ namespace Swashbuckle.OData.Descriptions
         public static PathItem CreateSwaggerPathForOperationImport(IEdmOperationImport operationImport, ODataRoute oDataRoute)
         {
             Contract.Requires(operationImport != null);
-
             Contract.Assume(operationImport.Operation?.Parameters != null);
 
             var isFunctionImport = operationImport is IEdmFunctionImport;
             var swaggerParameters = new List<Parameter>();
-            foreach (var parameter in operationImport.Operation.Parameters)
+
+            if (operationImport is IEdmFunctionImport)
             {
-                Contract.Assume(parameter != null);
+                foreach (var parameter in operationImport.Operation.Parameters)
+                {
+                    Contract.Assume(parameter != null);
 
-                var edmType = parameter.GetOperationType().GetDefinition();
+                    var edmType = parameter.GetOperationType().GetDefinition();
 
-                swaggerParameters.Parameter(parameter.Name, isFunctionImport ? "path" : "body", "parameter: " + parameter.Name, edmType, !parameter.Type.IsNullable);
+                    swaggerParameters.Parameter(parameter.Name, isFunctionImport ? "path" : "body", "parameter: " + parameter.Name, edmType, !parameter.Type.IsNullable);
+                }
+            }
+            else
+            {
+                AddSwaggerParametersForUnboundAction(swaggerParameters, operationImport.Operation);
             }
 
             var swaggerResponses = new Dictionary<string, Response>();
@@ -380,6 +387,42 @@ namespace Swashbuckle.OData.Descriptions
                 properties = new Dictionary<string, Schema>()
             };
             foreach (var parameter in operation.Parameters.Skip(1))
+            {
+                Contract.Assume(parameter != null);
+                var propertySchema = new Schema();
+                SetSwaggerType(propertySchema, parameter.Type.Definition);
+                bodySchema.properties.Add(parameter.Name, propertySchema);
+                if (!parameter.Type.IsNullable)
+                {
+                    if (bodySchema.required == null)
+                    {
+                        bodySchema.required = new List<string>();
+                    }
+                    bodySchema.required.Add(parameter.Name);
+                }
+            }
+            bodyParameter.schema = bodySchema;
+            swaggerParameters.Add(bodyParameter);
+        }
+
+        private static void AddSwaggerParametersForUnboundAction(List<Parameter> swaggerParameters, IEdmOperation operation)
+        {
+            Contract.Requires(swaggerParameters != null);
+            Contract.Requires(operation != null);
+
+            var bodyParameter = new Parameter
+            {
+                name = operation.Name + "ActionParameters",
+                @in = "body",
+                description = operation.Name + " action parameters",
+                required = operation.Parameters.Any(parameter => !parameter.Type.IsNullable)
+            };
+            var bodySchema = new Schema
+            {
+                type = "object",
+                properties = new Dictionary<string, Schema>()
+            };
+            foreach (var parameter in operation.Parameters)
             {
                 Contract.Assume(parameter != null);
                 var propertySchema = new Schema();
@@ -615,7 +658,7 @@ namespace Swashbuckle.OData.Descriptions
             {
                 parameterPrefix = String.Format(paramNamePrefixFormat, parameterName);
             }
-            
+
             switch (type.Definition.TypeKind)
             {
                 case EdmTypeKind.Enum:
