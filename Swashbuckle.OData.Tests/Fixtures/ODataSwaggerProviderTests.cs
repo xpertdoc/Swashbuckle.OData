@@ -258,7 +258,6 @@ namespace Swashbuckle.OData.Tests
         {
             public override ICollection<Assembly> GetAssemblies()
             {
-                throw new Exception("");
                 ICollection<Assembly> baseAssemblies = base.GetAssemblies();
                 return baseAssemblies;
             }
